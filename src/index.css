@@ -1,0 +1,30 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+html {
+  background: #010208;
+  scrollbar-color: rgba(127, 143, 177, 0.45) rgba(7, 9, 18, 0.95);
+}
+
+body {
+  min-height: 100svh;
+  overflow-x: hidden;
+  background: #010208;
+}

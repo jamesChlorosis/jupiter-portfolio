@@ -1,0 +1,52 @@
+{
+  "frameSummary": {
+    "sampleCount": 501,
+    "averageFrameMs": 16.88423153692689,
+    "minFps": 14.925373134328359,
+    "averageFps": 59.66044425261549,
+    "longFrames": 262,
+    "severeFrames": 2,
+    "maxFrameMs": 67,
+    "p95FrameMs": 16.80000000000109,
+    "p99FrameMs": 16.90000000000009
+  },
+  "traceSummary": {
+    "gpuLikeTimeMs": 2741.15,
+    "mainThreadTimeMs": 25421.63,
+    "rasterLikeTimeMs": 148.57,
+    "topEvents": [
+      {
+        "name": "RunTask",
+        "totalMs": 17884.33
+      },
+      {
+        "name": "FunctionCall",
+        "totalMs": 6347.98
+      },
+      {
+        "name": "Scheduler::RunTask",
+        "totalMs": 710.3
+      },
+      {
+        "name": "FireAnimationFrame",
+        "totalMs": 328.67
+      },
+      {
+        "name": "GpuChannel::ExecuteDeferredRequest",
+        "totalMs": 321.35
+      },
+      {
+        "name": "GPUTask",
+        "totalMs": 314.59
+      },
+      {
+        "name": "CommandBuffer::Flush",
+        "totalMs": 289.96
+      },
+      {
+        "name": "CommandBufferStub::OnAsyncFlush",
+        "totalMs": 288.8
+      }
+    ]
+  }
+}

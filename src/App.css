@@ -1,0 +1,45 @@
+.app-shell {
+  position: relative;
+  min-height: 560svh;
+}
+
+.scene-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: auto;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(31, 48, 89, 0.14), transparent 28%),
+    radial-gradient(circle at 50% 50%, rgba(216, 101, 38, 0.08), transparent 18%),
+    linear-gradient(180deg, #04060d 0%, #02030b 52%, #010208 100%);
+}
+
+.scene-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at center, transparent 40%, rgba(0, 0, 0, 0.24) 68%, rgba(0, 0, 0, 0.72) 100%),
+    linear-gradient(180deg, rgba(1, 2, 6, 0.24) 0%, transparent 28%, rgba(1, 2, 6, 0.3) 100%);
+}
+
+.scene-shell canvas {
+  display: block;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+
+.scroll-track {
+  height: 560svh;
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    min-height: 420svh;
+  }
+
+  .scroll-track {
+    height: 420svh;
+  }
+}
