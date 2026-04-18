@@ -33,16 +33,23 @@ function EffectsGate({ lights }: { lights: RefObject<Object3D>[] }) {
 
 export function SceneContents() {
   const ambientLightRef = useRef<Object3D>(null!)
+  const hemisphereLightRef = useRef<Object3D>(null!)
   const keyLightRef = useRef<Object3D>(null!)
   const fillLightRef = useRef<Object3D>(null!)
   const bloomLights = useMemo(
-    () => [ambientLightRef, keyLightRef, fillLightRef],
+    () => [ambientLightRef, hemisphereLightRef, keyLightRef, fillLightRef],
     [],
   )
 
   return (
     <Selection enabled>
       <ambientLight ref={ambientLightRef} intensity={0.45} />
+      <hemisphereLight
+        ref={hemisphereLightRef}
+        color="#b8cbff"
+        groundColor="#05070f"
+        intensity={0.44}
+      />
       <directionalLight
         ref={keyLightRef}
         color="#f9c090"

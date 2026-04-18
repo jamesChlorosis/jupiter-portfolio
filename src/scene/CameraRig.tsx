@@ -1,7 +1,7 @@
 import { useFrame } from '@react-three/fiber'
 import { damp3 } from 'maath/easing'
 import { MathUtils, Vector3 } from 'three'
-import { interactionState } from './interactionState'
+import { interactionState, setFocusCameraSettled } from './interactionState'
 import { scrollState } from './scrollState'
 import { cameraPath, focusPath, getZoneInfluence, orbitZones } from './storyboard'
 
@@ -92,6 +92,8 @@ export function CameraRig() {
       finalCameraTarget.copy(focusedCameraTarget)
       focusTarget.lerp(focusedLookTarget, 0.72)
       targetFov = MathUtils.lerp(targetFov, 26.5, 0.8)
+    } else {
+      setFocusCameraSettled(false)
     }
 
     damp3(camera.position, finalCameraTarget, focusedAnchor ? 0.18 : 0.24, delta)
@@ -110,6 +112,20 @@ export function CameraRig() {
     if (Math.abs(nextFov - camera.fov) > 0.01) {
       camera.fov = nextFov
       camera.updateProjectionMatrix()
+    }
+
+    if (focusedAnchor) {
+      const settledThresholdScale = interactionState.focusCameraSettled ? 1.9 : 1
+      const positionSettled =
+        camera.position.distanceToSquared(finalCameraTarget) <
+        0.016 * settledThresholdScale
+      const lookSettled =
+        lookAtTarget.distanceToSquared(focusTarget) <
+        0.01 * settledThresholdScale
+      const fovSettled =
+        Math.abs(camera.fov - targetFov) < 0.18 * settledThresholdScale
+
+      setFocusCameraSettled(positionSettled && lookSettled && fovSettled)
     }
   })
 

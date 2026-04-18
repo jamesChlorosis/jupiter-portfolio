@@ -4,6 +4,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import './App.css'
 import { SceneCanvas } from './scene/SceneCanvas'
 import { scrollState } from './scene/scrollState'
+import { FocusedProjectCard } from './ui/FocusedProjectCard'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -52,6 +53,7 @@ function App() {
       <div className="scene-shell">
         <SceneCanvas />
       </div>
+      <FocusedProjectCard />
       <div ref={scrollTrackRef} className="scroll-track" aria-hidden="true" />
     </main>
   )

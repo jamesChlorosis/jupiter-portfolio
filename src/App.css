@@ -34,6 +34,10 @@
   height: 560svh;
 }
 
+.app-shell button {
+  appearance: none;
+}
+
 @media (max-width: 768px) {
   .app-shell {
     min-height: 420svh;

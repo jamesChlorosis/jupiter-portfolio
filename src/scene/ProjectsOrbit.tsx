@@ -1,12 +1,13 @@
 import { type ThreeEvent, useFrame } from '@react-three/fiber'
 import { Select } from '@react-three/postprocessing'
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
+  Color,
+  DynamicDrawUsage,
   Group,
+  InstancedMesh,
   MathUtils,
-  Mesh,
-  MeshBasicMaterial,
-  MeshStandardMaterial,
+  Object3D,
   Vector3,
 } from 'three'
 import {
@@ -14,42 +15,31 @@ import {
   setFocusedProject,
   setHoveredProject,
 } from './interactionState'
-import { projects, type ProjectSatellite } from './projectData'
+import { projects } from './projectData'
 import { scrollState } from './scrollState'
 import { getZoneById } from './storyboard'
 
-type SatelliteNodes = {
-  coreMaterial: MeshStandardMaterial | null
-  glowMaterial: MeshBasicMaterial | null
-  group: Group | null
-  haloMaterial: MeshBasicMaterial | null
-  hitMesh: Mesh | null
-  trackMaterial: MeshBasicMaterial | null
+type RuntimeSatellite = {
+  position: Vector3
+  roll: number
+  scale: number
+  spin: number
+  trackScale: number
 }
 
-type SatelliteNodeKey = keyof SatelliteNodes
-type RegisterNode = (
-  index: number,
-  key: SatelliteNodeKey,
-) => (value: SatelliteNodes[SatelliteNodeKey]) => void
-
-const orbitAxis = new Vector3(1, 0, 0)
 const projectZone = getZoneById('projects')
 const staggerWindow = 0.032
-const assignmentEpsilon = 0.0005
-
-function getOrbitPosition(
-  target: Vector3,
-  angle: number,
-  radius: number,
-  height: number,
-  inclination: number,
-) {
-  target.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
-  target.applyAxisAngle(orbitAxis, inclination)
-  target.y += height
-  return target
-}
+const orbitAxis = new Vector3(1, 0, 0)
+const tempObject = new Object3D()
+const tempColor = new Color()
+const tempGlowOffset = new Vector3()
+const tempBeaconOffset = new Vector3()
+const tempBeaconPosition = new Vector3()
+const tempGlowPosition = new Vector3()
+const tempWorldPosition = new Vector3()
+const origin = new Vector3()
+const instanceCount = projects.length
+const hiddenScale = 0.0001
 
 function getProjectsReveal(progress: number, delay = 0) {
   if (!projectZone) {
@@ -72,74 +62,140 @@ function getProjectsReveal(progress: number, delay = 0) {
   return MathUtils.clamp(intro * outro, 0, 1)
 }
 
-function dampNumber(
-  current: number,
-  target: number,
-  smoothing: number,
-  delta: number,
-  epsilon = assignmentEpsilon,
+function getOrbitPosition(
+  target: Vector3,
+  angle: number,
+  radius: number,
+  height: number,
+  inclination: number,
 ) {
-  if (Math.abs(current - target) <= epsilon) {
-    return target
-  }
-
-  const next = MathUtils.damp(current, target, smoothing, delta)
-  return Math.abs(next - target) <= epsilon ? target : next
+  target.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
+  target.applyAxisAngle(orbitAxis, inclination)
+  target.y += height
+  return target
 }
 
-function createEmptyNodes(): SatelliteNodes {
-  return {
-    coreMaterial: null,
-    glowMaterial: null,
-    group: null,
-    haloMaterial: null,
-    hitMesh: null,
-    trackMaterial: null,
-  }
+function composeInstanceMatrix(
+  position: Vector3,
+  scaleX: number,
+  scaleY: number,
+  scaleZ: number,
+  rotationX: number,
+  rotationY: number,
+  rotationZ: number,
+) {
+  tempObject.position.copy(position)
+  tempObject.rotation.set(rotationX, rotationY, rotationZ)
+  tempObject.scale.set(scaleX, scaleY, scaleZ)
+  tempObject.updateMatrix()
+  return tempObject.matrix
 }
 
-function ProjectTrackNode({
-  index,
-  project,
-  registerNode,
-}: {
-  index: number
-  project: ProjectSatellite
-  registerNode: RegisterNode
-}) {
-  return (
-    <mesh rotation={[Math.PI / 2, project.angle * 0.08, 0]} scale={[project.radius, project.radius, 1]}>
-      <torusGeometry args={[1, 0.006, 10, 96]} />
-      <meshBasicMaterial
-        ref={registerNode(index, 'trackMaterial')}
-        color={project.color}
-        depthWrite={false}
-        opacity={0}
-        toneMapped={false}
-        transparent
-      />
-    </mesh>
+function setInstanceColor(
+  mesh: InstancedMesh,
+  index: number,
+  baseColor: Color,
+  intensity: number,
+) {
+  tempColor.copy(baseColor).multiplyScalar(Math.max(intensity, 0))
+  mesh.setColorAt(index, tempColor)
+}
+
+export function ProjectsOrbit() {
+  const layerRef = useRef<Group>(null)
+  const trackMeshRef = useRef<InstancedMesh>(null)
+  const hitMeshRef = useRef<InstancedMesh>(null)
+  const coreMeshRef = useRef<InstancedMesh>(null)
+  const frameMeshRef = useRef<InstancedMesh>(null)
+  const glowMeshRef = useRef<InstancedMesh>(null)
+  const beaconMeshRef = useRef<InstancedMesh>(null)
+  const haloMeshRef = useRef<InstancedMesh>(null)
+
+  const runtimeSatellites = useRef<RuntimeSatellite[]>(
+    projects.map(() => ({
+      position: new Vector3(),
+      roll: 0,
+      scale: hiddenScale,
+      spin: 0,
+      trackScale: hiddenScale,
+    })),
   )
-}
+  const baseColors = useMemo(() => projects.map((project) => new Color(project.color)), [])
+  const revealDelays = useMemo(
+    () => projects.map((_, index) => index * staggerWindow),
+    [],
+  )
+  const anchorCache = useRef(projects.map(() => new Vector3()))
 
-function SatelliteNode({
-  index,
-  project,
-  registerNode,
-}: {
-  index: number
-  project: ProjectSatellite
-  registerNode: RegisterNode
-}) {
-  const handlePointerOver = (event: ThreeEvent<PointerEvent>) => {
-    event.stopPropagation()
-    setHoveredProject(project.id)
-    document.body.style.cursor = 'pointer'
+  useEffect(() => {
+    const meshes = [
+      trackMeshRef.current,
+      hitMeshRef.current,
+      coreMeshRef.current,
+      frameMeshRef.current,
+      glowMeshRef.current,
+      beaconMeshRef.current,
+      haloMeshRef.current,
+    ]
+
+    for (let index = 0; index < meshes.length; index += 1) {
+      const mesh = meshes[index]
+      if (!mesh) {
+        continue
+      }
+
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+      mesh.frustumCulled = false
+    }
+
+    if (coreMeshRef.current?.instanceColor) {
+      coreMeshRef.current.instanceColor.setUsage(DynamicDrawUsage)
+    }
+    if (glowMeshRef.current?.instanceColor) {
+      glowMeshRef.current.instanceColor.setUsage(DynamicDrawUsage)
+    }
+    if (beaconMeshRef.current?.instanceColor) {
+      beaconMeshRef.current.instanceColor.setUsage(DynamicDrawUsage)
+    }
+    if (haloMeshRef.current?.instanceColor) {
+      haloMeshRef.current.instanceColor.setUsage(DynamicDrawUsage)
+    }
+    if (trackMeshRef.current?.instanceColor) {
+      trackMeshRef.current.instanceColor.setUsage(DynamicDrawUsage)
+    }
+  }, [])
+
+  const clearInteraction = () => {
+    if (interactionState.hoveredProjectId !== null) {
+      setHoveredProject(null)
+      document.body.style.cursor = ''
+    }
+    if (interactionState.focusedProjectId !== null) {
+      setFocusedProject(null)
+    }
   }
 
-  const handlePointerOut = (event: ThreeEvent<PointerEvent>) => {
+  const updateHoveredProject = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation()
-    if (interactionState.hoveredProjectId === project.id) {
+    const instanceId = event.instanceId
+    if (instanceId == null) {
+      return
+    }
+
+    const project = projects[instanceId]
+    if (!project) {
+      return
+    }
+
+    if (interactionState.hoveredProjectId !== project.id) {
+      setHoveredProject(project.id)
+      document.body.style.cursor = 'pointer'
+    }
+  }
+
+  const clearHoveredProject = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation()
+    if (interactionState.hoveredProjectId !== null) {
       setHoveredProject(null)
       document.body.style.cursor = ''
     }
@@ -147,350 +203,399 @@ function SatelliteNode({
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation()
+    const instanceId = event.instanceId
+    if (instanceId == null) {
+      return
+    }
+
+    const project = projects[instanceId]
+    if (!project) {
+      return
+    }
+
     const isFocused = interactionState.focusedProjectId === project.id
     setFocusedProject(isFocused ? null : project.id)
   }
 
-  return (
-    <group ref={registerNode(index, 'group')}>
-      <mesh
-        ref={registerNode(index, 'hitMesh')}
-        onClick={handleClick}
-        onPointerOut={handlePointerOut}
-        onPointerOver={handlePointerOver}
-        scale={project.size * 1.85}
-      >
-        <icosahedronGeometry args={[1, 1]} />
-        <meshBasicMaterial opacity={0} transparent />
-      </mesh>
-      <Select enabled>
-        <mesh scale={project.size * 0.68}>
-          <icosahedronGeometry args={[1, 1]} />
-          <meshBasicMaterial
-            ref={registerNode(index, 'glowMaterial')}
-            color={project.color}
-            depthWrite={false}
-            opacity={0}
-            toneMapped={false}
-            transparent
-          />
-        </mesh>
-      </Select>
-      <mesh scale={project.size}>
-        <icosahedronGeometry args={[1, 1]} />
-        <meshStandardMaterial
-          ref={registerNode(index, 'coreMaterial')}
-          color={project.color}
-          emissive={project.color}
-          metalness={0.55}
-          opacity={0}
-          roughness={0.35}
-          transparent
-        />
-      </mesh>
-      <mesh scale={project.size * 1.85}>
-        <icosahedronGeometry args={[1, 2]} />
-        <meshBasicMaterial
-          ref={registerNode(index, 'haloMaterial')}
-          color={project.color}
-          depthWrite={false}
-          opacity={0}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-    </group>
-  )
-}
-
-export function ProjectsOrbit() {
-  const layerRef = useRef<Group>(null)
-  const satelliteNodes = useRef<SatelliteNodes[]>(
-    projects.map(() => createEmptyNodes()),
-  )
-  const orbitTargets = useRef(projects.map(() => new Vector3()))
-  const worldAnchors = useRef(projects.map(() => new Vector3()))
-  const revealDelays = useMemo(
-    () => projects.map((_, index) => index * staggerWindow),
-    [],
-  )
-  const registerNode = useMemo(() => {
-    return function registerNode(index: number, key: SatelliteNodeKey) {
-      return (value: SatelliteNodes[SatelliteNodeKey]) => {
-        const node = satelliteNodes.current[index]
-
-        switch (key) {
-          case 'group':
-            node.group = value as Group | null
-            break
-          case 'hitMesh':
-            node.hitMesh = value as Mesh | null
-            break
-          case 'coreMaterial':
-            node.coreMaterial = value as MeshStandardMaterial | null
-            break
-          case 'glowMaterial':
-            node.glowMaterial = value as MeshBasicMaterial | null
-            break
-          case 'haloMaterial':
-            node.haloMaterial = value as MeshBasicMaterial | null
-            break
-          case 'trackMaterial':
-            node.trackMaterial = value as MeshBasicMaterial | null
-            break
-          default:
-            break
-        }
-      }
-    }
-  }, [])
-
   useFrame((state, delta) => {
     const layer = layerRef.current
-    if (!layer) {
+    const trackMesh = trackMeshRef.current
+    const hitMesh = hitMeshRef.current
+    const coreMesh = coreMeshRef.current
+    const frameMesh = frameMeshRef.current
+    const glowMesh = glowMeshRef.current
+    const beaconMesh = beaconMeshRef.current
+    const haloMesh = haloMeshRef.current
+
+    if (
+      !layer ||
+      !trackMesh ||
+      !hitMesh ||
+      !coreMesh ||
+      !frameMesh ||
+      !glowMesh ||
+      !beaconMesh ||
+      !haloMesh
+    ) {
       return
     }
 
     const progress = scrollState.progress
     const velocity = scrollState.velocity
-    const reveal = getProjectsReveal(progress)
-    const layerVisible = reveal > 0.01
+    const zoneReveal = getProjectsReveal(progress)
+    const zoneActive = zoneReveal > 0.01
 
-    if (layer.visible !== layerVisible) {
-      layer.visible = layerVisible
+    if (layer.visible !== zoneActive) {
+      layer.visible = zoneActive
     }
 
-    if (!layerVisible) {
-      if (interactionState.focusedProjectId) {
-        setFocusedProject(null)
-      }
-      if (interactionState.hoveredProjectId) {
-        setHoveredProject(null)
-        document.body.style.cursor = ''
-      }
+    if (!zoneActive) {
+      clearInteraction()
       return
     }
 
-    const focusedProjectId = interactionState.focusedProjectId
-    const hoveredProjectId = interactionState.hoveredProjectId
-    const hasFocusedProject = focusedProjectId !== null
+    const focusId = interactionState.focusedProjectId
+    const hoveredId = interactionState.hoveredProjectId
+    const hasFocusedProject = focusId !== null
     const focusSlowdown = hasFocusedProject ? 0.24 : 1
-    const layerRotationY =
-      layer.rotation.y + delta * (0.018 + reveal * 0.01) * focusSlowdown
-    if (Math.abs(layerRotationY - layer.rotation.y) > assignmentEpsilon) {
-      layer.rotation.y = layerRotationY
-    }
 
-    const nextLayerRotationX = dampNumber(
+    layer.rotation.y += delta * (0.018 + zoneReveal * 0.01) * focusSlowdown
+    layer.rotation.x = MathUtils.damp(
       layer.rotation.x,
       0.06 + velocity * 0.025,
       4,
       delta,
     )
-    if (nextLayerRotationX !== layer.rotation.x) {
-      layer.rotation.x = nextLayerRotationX
+
+    const layerScale = MathUtils.damp(layer.scale.x, 0.9 + zoneReveal * 0.1, 5, delta)
+    if (Math.abs(layerScale - layer.scale.x) > 0.0001) {
+      layer.scale.setScalar(layerScale)
     }
 
-    const nextLayerScale = dampNumber(layer.scale.x, 0.9 + reveal * 0.1, 5, delta)
-    if (nextLayerScale !== layer.scale.x) {
-      layer.scale.setScalar(nextLayerScale)
-    }
-
-    if (
-      hoveredProjectId &&
-      hasFocusedProject &&
-      hoveredProjectId !== focusedProjectId
-    ) {
-      setHoveredProject(null)
-      document.body.style.cursor = ''
-    }
+    layer.updateMatrixWorld(true)
 
     const elapsed = state.clock.getElapsedTime()
     const orbitPhase = progress * 0.16 + velocity * 0.08
     const driftTime = elapsed * 0.58
     const noiseTime = elapsed * 0.34
     const depthTime = elapsed * 0.28
-    const orbitNodes = satelliteNodes.current
+    const runtime = runtimeSatellites.current
     const anchorMap = interactionState.projectAnchors
 
-    for (let index = 0; index < projects.length; index += 1) {
+    for (let index = 0; index < instanceCount; index += 1) {
       const project = projects[index]
-      const node = orbitNodes[index]
-      const group = node.group
-      const trackMaterial = node.trackMaterial
-      const coreMaterial = node.coreMaterial
-      const haloMaterial = node.haloMaterial
-      const glowMaterial = node.glowMaterial
-
-      if (
-        !group ||
-        !trackMaterial ||
-        !coreMaterial ||
-        !haloMaterial ||
-        !glowMaterial
-      ) {
-        continue
-      }
-
-      const satelliteReveal = getProjectsReveal(progress, revealDelays[index])
-      const visible = satelliteReveal > 0.01
-      if (group.visible !== visible) {
-        group.visible = visible
-      }
-
-      const focused = focusedProjectId === project.id
-      const hovered = hoveredProjectId === project.id
+      const satellite = runtime[index]
+      const reveal = getProjectsReveal(progress, revealDelays[index])
+      const focused = focusId === project.id
+      const hovered = hoveredId === project.id
       const dimmed = hasFocusedProject && !focused
-      const interactive = satelliteReveal > 0.04 && (!hasFocusedProject || focused)
+      const activeForMotion = !dimmed
 
-      if (node.hitMesh && node.hitMesh.visible !== interactive) {
-        node.hitMesh.visible = interactive
-      }
-
-      const trackOpacityTarget =
-        satelliteReveal * 0.22 * (dimmed ? 0.2 : 1)
-      const nextTrackOpacity = dampNumber(
-        trackMaterial.opacity,
-        trackOpacityTarget,
-        4.8,
-        delta,
-      )
-      if (nextTrackOpacity !== trackMaterial.opacity) {
-        trackMaterial.opacity = nextTrackOpacity
-      }
-
-      if (!visible) {
-        continue
-      }
-
-      if (!dimmed) {
+      if (activeForMotion) {
         const orbitSpeedMultiplier = focused ? 0.16 : 1
         const orbitAngle =
           project.angle +
           elapsed * project.orbitSpeed * orbitSpeedMultiplier +
           orbitPhase
 
-        const targetPosition = orbitTargets.current[index]
         getOrbitPosition(
-          targetPosition,
+          satellite.position,
           orbitAngle,
           project.radius,
           project.height,
           project.inclination,
         )
-        targetPosition.x +=
+
+        satellite.position.x +=
           Math.sin(noiseTime + project.radius * 1.7) * 0.025
-        targetPosition.y +=
+        satellite.position.y +=
           Math.sin(driftTime + project.angle * 6.4) * 0.055
-        targetPosition.z +=
+        satellite.position.z +=
           Math.cos(depthTime + project.inclination * 12) * 0.025
 
-        if (group.position.distanceToSquared(targetPosition) > 0.000001) {
-          group.position.lerp(targetPosition, 1 - Math.exp(-delta * 3.6))
-        }
-
-        group.rotation.y += delta * (focused ? 0.16 : 0.28)
+        satellite.spin += delta * (focused ? 0.16 : 0.28)
       }
 
-      const nextRotationZ = dampNumber(
-        group.rotation.z,
+      satellite.roll = MathUtils.damp(
+        satellite.roll,
         hovered ? 0.24 : focused ? 0.18 : 0,
         4.5,
         delta,
       )
-      if (nextRotationZ !== group.rotation.z) {
-        group.rotation.z = nextRotationZ
-      }
 
       const targetScale =
-        0.54 +
-        satelliteReveal * 0.98 +
-        (hovered ? 0.18 : 0) +
-        (focused ? 0.42 : 0) -
-        (dimmed ? 0.18 : 0)
-      const nextScale = dampNumber(group.scale.x, targetScale, 5.4, delta)
-      if (nextScale !== group.scale.x) {
-        group.scale.setScalar(nextScale)
-      }
-
-      const nextCoreOpacity = dampNumber(
-        coreMaterial.opacity,
-        satelliteReveal * (dimmed ? 0.12 : focused ? 1 : 0.9),
-        5,
+        reveal <= 0.01
+          ? hiddenScale
+          : 0.28 +
+            reveal * 0.56 +
+            (hovered ? 0.08 : 0) +
+            (focused ? 0.2 : 0) -
+            (dimmed ? 0.08 : 0)
+      satellite.scale = MathUtils.damp(
+        satellite.scale,
+        Math.max(targetScale, hiddenScale),
+        5.4,
         delta,
       )
-      if (nextCoreOpacity !== coreMaterial.opacity) {
-        coreMaterial.opacity = nextCoreOpacity
-      }
 
-      const nextEmissive = dampNumber(
-        coreMaterial.emissiveIntensity,
-        satelliteReveal * 1.05 + (hovered ? 1.1 : 0) + (focused ? 1.75 : 0),
+      const targetTrackScale =
+        reveal <= 0.01
+          ? hiddenScale
+          : 0.86 + reveal * 0.1 - (dimmed ? 0.08 : 0)
+      satellite.trackScale = MathUtils.damp(
+        satellite.trackScale,
+        Math.max(targetTrackScale, hiddenScale),
         4.8,
         delta,
       )
-      if (nextEmissive !== coreMaterial.emissiveIntensity) {
-        coreMaterial.emissiveIntensity = nextEmissive
-      }
 
-      const nextRoughness = dampNumber(
-        coreMaterial.roughness,
-        focused ? 0.18 : 0.35,
-        5,
-        delta,
+      const glowColorIntensity =
+        reveal * 0.16 + (hovered ? 0.08 : 0) + (focused ? 0.14 : 0)
+      const frameColorIntensity =
+        reveal * (dimmed ? 0.08 : focused ? 0.34 : 0.24)
+      const beaconPulse =
+        0.78 + Math.sin(elapsed * (focused ? 4.8 : 3.2) + index * 1.3) * 0.12
+      const beaconColorIntensity =
+        reveal * (dimmed ? 0.12 : 0.46) * beaconPulse +
+        (hovered ? 0.1 : 0) +
+        (focused ? 0.18 : 0)
+      const haloColorIntensity =
+        reveal * 0.08 + (hovered ? 0.05 : 0) + (focused ? 0.08 : 0)
+      const trackColorIntensity =
+        reveal * (dimmed ? 0.03 : focused ? 0.12 : 0.08)
+      const coreScale = project.size * satellite.scale * 0.7
+      const frameScale = coreScale * (focused ? 1.62 : hovered ? 1.56 : 1.48)
+      const glowScale = coreScale * (focused ? 1.08 : hovered ? 1.04 : 1)
+      const haloScale = coreScale * (focused ? 1.55 : 1.42)
+      const beaconScale = coreScale * (focused ? 0.28 : hovered ? 0.25 : 0.22)
+      const hitScale =
+        reveal > 0.04 && (!hasFocusedProject || focused)
+          ? coreScale * 1.85
+          : hiddenScale
+
+      const baseColor = baseColors[index]
+      setInstanceColor(trackMesh, index, baseColor, trackColorIntensity)
+      setInstanceColor(frameMesh, index, baseColor, frameColorIntensity)
+      setInstanceColor(glowMesh, index, baseColor, glowColorIntensity)
+      setInstanceColor(beaconMesh, index, baseColor, beaconColorIntensity)
+      setInstanceColor(haloMesh, index, baseColor, haloColorIntensity)
+
+      const trackMatrix = composeInstanceMatrix(
+        origin,
+        project.radius * satellite.trackScale,
+        project.radius * satellite.trackScale,
+        satellite.trackScale,
+        Math.PI / 2,
+        project.angle * 0.26 + elapsed * 0.012,
+        project.inclination * 0.65,
       )
-      if (nextRoughness !== coreMaterial.roughness) {
-        coreMaterial.roughness = nextRoughness
-      }
+      trackMesh.setMatrixAt(index, trackMatrix)
 
-      const nextHaloOpacity = dampNumber(
-        haloMaterial.opacity,
-        satelliteReveal * 0.1 + (hovered ? 0.12 : 0) + (focused ? 0.16 : 0),
-        4.8,
-        delta,
+      const coreMatrix = composeInstanceMatrix(
+        satellite.position,
+        coreScale,
+        coreScale,
+        coreScale,
+        0,
+        satellite.spin,
+        satellite.roll,
       )
-      if (nextHaloOpacity !== haloMaterial.opacity) {
-        haloMaterial.opacity = nextHaloOpacity
-      }
+      coreMesh.setMatrixAt(index, coreMatrix)
 
-      const nextGlowOpacity = dampNumber(
-        glowMaterial.opacity,
-        satelliteReveal * 0.14 + (hovered ? 0.12 : 0) + (focused ? 0.2 : 0),
-        5,
-        delta,
+      const frameMatrix = composeInstanceMatrix(
+        satellite.position,
+        frameScale,
+        frameScale,
+        frameScale,
+        satellite.spin * 0.9 + 0.42,
+        satellite.roll + project.inclination * 2.2,
+        project.angle * 0.32 + elapsed * 0.05,
       )
-      if (nextGlowOpacity !== glowMaterial.opacity) {
-        glowMaterial.opacity = nextGlowOpacity
-      }
+      frameMesh.setMatrixAt(index, frameMatrix)
 
-      if (!dimmed || focused) {
-        const worldAnchor = worldAnchors.current[index]
-        group.getWorldPosition(worldAnchor)
-        const anchor = anchorMap.get(project.id) ?? new Vector3()
-        anchor.copy(worldAnchor)
-        anchorMap.set(project.id, anchor)
-      }
+      tempGlowOffset.set(
+        Math.cos(satellite.spin * 1.4 + project.angle) * coreScale * 0.12,
+        Math.sin(satellite.spin * 1.1 + project.height * 12) * coreScale * 0.08,
+        Math.sin(satellite.spin * 1.4 + project.angle) * coreScale * 0.1,
+      )
+      tempGlowPosition.copy(satellite.position).add(tempGlowOffset)
+      const glowMatrix = composeInstanceMatrix(
+        tempGlowPosition,
+        glowScale,
+        glowScale,
+        glowScale,
+        0,
+        satellite.spin,
+        satellite.roll,
+      )
+      glowMesh.setMatrixAt(index, glowMatrix)
+
+      tempBeaconOffset.set(
+        Math.cos(satellite.spin * 1.18 + project.angle * 4.4) * coreScale * 1.2,
+        coreScale * 0.34 +
+          Math.sin(driftTime * 0.8 + project.height * 18) * coreScale * 0.18,
+        Math.sin(satellite.spin * 1.18 + project.angle * 4.4) * coreScale * 0.78,
+      )
+      tempBeaconPosition.copy(satellite.position).add(tempBeaconOffset)
+      const beaconMatrix = composeInstanceMatrix(
+        tempBeaconPosition,
+        beaconScale,
+        beaconScale,
+        beaconScale,
+        0,
+        satellite.spin * 1.4,
+        satellite.roll * 0.4,
+      )
+      beaconMesh.setMatrixAt(index, beaconMatrix)
+
+      const haloMatrix = composeInstanceMatrix(
+        satellite.position,
+        haloScale,
+        haloScale,
+        haloScale,
+        0,
+        satellite.spin,
+        satellite.roll,
+      )
+      haloMesh.setMatrixAt(index, haloMatrix)
+
+      const hitMatrix = composeInstanceMatrix(
+        satellite.position,
+        hitScale,
+        hitScale,
+        hitScale,
+        0,
+        satellite.spin,
+        satellite.roll,
+      )
+      hitMesh.setMatrixAt(index, hitMatrix)
+
+      tempWorldPosition.copy(satellite.position).applyMatrix4(layer.matrixWorld)
+      anchorCache.current[index].copy(tempWorldPosition)
+      anchorMap.set(project.id, anchorCache.current[index])
+    }
+
+    trackMesh.instanceMatrix.needsUpdate = true
+    coreMesh.instanceMatrix.needsUpdate = true
+    frameMesh.instanceMatrix.needsUpdate = true
+    glowMesh.instanceMatrix.needsUpdate = true
+    beaconMesh.instanceMatrix.needsUpdate = true
+    haloMesh.instanceMatrix.needsUpdate = true
+    hitMesh.instanceMatrix.needsUpdate = true
+
+    if (trackMesh.instanceColor) {
+      trackMesh.instanceColor.needsUpdate = true
+    }
+    if (frameMesh.instanceColor) {
+      frameMesh.instanceColor.needsUpdate = true
+    }
+    if (glowMesh.instanceColor) {
+      glowMesh.instanceColor.needsUpdate = true
+    }
+    if (beaconMesh.instanceColor) {
+      beaconMesh.instanceColor.needsUpdate = true
+    }
+    if (haloMesh.instanceColor) {
+      haloMesh.instanceColor.needsUpdate = true
     }
   })
 
   return (
     <group ref={layerRef}>
-      {projects.map((project, index) => (
-        <ProjectTrackNode
-          key={`${project.id}-track`}
-          index={index}
-          project={project}
-          registerNode={registerNode}
+      <instancedMesh
+        ref={trackMeshRef}
+        args={[undefined, undefined, instanceCount]}
+        renderOrder={-1}
+      >
+        <torusGeometry args={[1, 0.0032, 8, 72, Math.PI * 1.42]} />
+        <meshStandardMaterial
+          depthWrite={false}
+          emissive="#152033"
+          emissiveIntensity={0.08}
+          metalness={0.08}
+          opacity={0.24}
+          roughness={0.92}
+          toneMapped={false}
+          transparent
+          vertexColors
         />
-      ))}
-      {projects.map((project, index) => (
-        <SatelliteNode
-          key={project.id}
-          index={index}
-          project={project}
-          registerNode={registerNode}
+      </instancedMesh>
+
+      <instancedMesh
+        ref={hitMeshRef}
+        args={[undefined, undefined, instanceCount]}
+        onClick={handleClick}
+        onPointerMove={updateHoveredProject}
+        onPointerOut={clearHoveredProject}
+      >
+        <icosahedronGeometry args={[1, 1]} />
+        <meshBasicMaterial opacity={0} transparent />
+      </instancedMesh>
+
+      <instancedMesh ref={coreMeshRef} args={[undefined, undefined, instanceCount]}>
+        <icosahedronGeometry args={[1, 2]} />
+        <meshPhysicalMaterial
+          clearcoat={0.62}
+          clearcoatRoughness={0.42}
+          color="#121a2a"
+          emissive="#243754"
+          emissiveIntensity={0.22}
+          metalness={0.14}
+          roughness={0.48}
         />
-      ))}
+      </instancedMesh>
+
+      <instancedMesh ref={frameMeshRef} args={[undefined, undefined, instanceCount]}>
+        <torusGeometry args={[1, 0.08, 8, 28, Math.PI * 1.7]} />
+        <meshStandardMaterial
+          emissive="#273958"
+          emissiveIntensity={0.14}
+          metalness={0.48}
+          roughness={0.34}
+          toneMapped={false}
+          vertexColors
+        />
+      </instancedMesh>
+
+      <Select enabled>
+        <>
+          <instancedMesh ref={glowMeshRef} args={[undefined, undefined, instanceCount]}>
+            <icosahedronGeometry args={[1, 2]} />
+            <meshBasicMaterial
+              depthTest
+              depthWrite={false}
+              opacity={0.42}
+              toneMapped={false}
+              transparent
+              vertexColors
+            />
+          </instancedMesh>
+
+          <instancedMesh ref={beaconMeshRef} args={[undefined, undefined, instanceCount]}>
+            <sphereGeometry args={[1, 18, 18]} />
+            <meshBasicMaterial
+              depthTest
+              depthWrite={false}
+              opacity={0.95}
+              toneMapped={false}
+              transparent
+              vertexColors
+            />
+          </instancedMesh>
+        </>
+      </Select>
+
+      <instancedMesh ref={haloMeshRef} args={[undefined, undefined, instanceCount]}>
+        <sphereGeometry args={[1, 18, 18]} />
+        <meshBasicMaterial
+          depthTest
+          depthWrite={false}
+          opacity={0.18}
+          toneMapped={false}
+          transparent
+          vertexColors
+        />
+      </instancedMesh>
     </group>
   )
 }

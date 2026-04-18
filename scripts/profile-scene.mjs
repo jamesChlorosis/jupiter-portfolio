@@ -5,13 +5,15 @@ import path from 'node:path'
 import process from 'node:process'
 
 const DEBUG_PORT = Number(process.env.CDP_PORT ?? 9222)
+const APP_PORT = Number(process.env.APP_PORT ?? 4173)
+const HEADLESS = !/^(0|false)$/i.test(process.env.HEADLESS ?? '1')
 const OUTPUT_PATH = path.resolve(process.cwd(), 'profiling-report.json')
 const DIST_PATH = path.resolve(process.cwd(), 'dist')
 const PROFILE_PATH = path.resolve(
   process.cwd(),
   `.chrome-profile-profile-${DEBUG_PORT}`,
 )
-const APP_URL = 'http://127.0.0.1:4173'
+const APP_URL = `http://127.0.0.1:${APP_PORT}`
 
 let nextId = 1
 let traceResolve
@@ -83,7 +85,7 @@ async function startStaticServer() {
 
   await new Promise((resolve, reject) => {
     server.once('error', reject)
-    server.listen(4173, '127.0.0.1', resolve)
+    server.listen(APP_PORT, '127.0.0.1', resolve)
   })
 
   return server
@@ -96,19 +98,27 @@ async function launchChrome() {
     process.env.CHROME_PATH ??
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 
+  const chromeArgs = [
+    `--remote-debugging-port=${DEBUG_PORT}`,
+    `--user-data-dir=${PROFILE_PATH}`,
+    '--enable-gpu',
+    '--enable-webgl',
+    '--ignore-gpu-blocklist',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--window-size=1440,960',
+    APP_URL,
+  ]
+
+  if (HEADLESS) {
+    chromeArgs.unshift('--headless=new')
+  } else {
+    chromeArgs.unshift('--new-window')
+  }
+
   const chrome = spawn(
     chromePath,
-    [
-      '--headless=new',
-      `--remote-debugging-port=${DEBUG_PORT}`,
-      `--user-data-dir=${PROFILE_PATH}`,
-      '--enable-gpu',
-      '--enable-webgl',
-      '--ignore-gpu-blocklist',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      APP_URL,
-    ],
+    chromeArgs,
     {
       detached: false,
       stdio: 'ignore',
@@ -190,11 +200,28 @@ function percentile(values, ratio) {
   return sorted[index]
 }
 
+function findMarkTimestamp(events, label) {
+  const mark = events.find(
+    (event) =>
+      event.name === label &&
+      typeof event.ts === 'number' &&
+      (event.ph === 'I' || event.ph === 'R' || event.ph === 'i'),
+  )
+
+  return mark?.ts ?? null
+}
+
 function summarizeTrace(events) {
   const durationByName = new Map()
   let mainThreadTimeMs = 0
   let gpuLikeTimeMs = 0
   let rasterLikeTimeMs = 0
+  let styleLikeTimeMs = 0
+  let layoutLikeTimeMs = 0
+  let paintLikeTimeMs = 0
+  let compositeLikeTimeMs = 0
+  let layerLikeTimeMs = 0
+  let layerEventCount = 0
 
   for (const event of events) {
     if (event.ph !== 'X' || typeof event.dur !== 'number') {
@@ -220,6 +247,27 @@ function summarizeTrace(events) {
     if (event.cat?.includes('gpu') || name.includes('Gpu')) {
       gpuLikeTimeMs += durationMs
     }
+
+    if (name === 'UpdateLayoutTree' || name.includes('Style')) {
+      styleLikeTimeMs += durationMs
+    }
+
+    if (name === 'Layout') {
+      layoutLikeTimeMs += durationMs
+    }
+
+    if (name.includes('Paint') || name.includes('Raster')) {
+      paintLikeTimeMs += durationMs
+    }
+
+    if (name.includes('Composite')) {
+      compositeLikeTimeMs += durationMs
+    }
+
+    if (name.includes('Layer')) {
+      layerLikeTimeMs += durationMs
+      layerEventCount += 1
+    }
   }
 
   const topEvents = [...durationByName.entries()]
@@ -231,8 +279,36 @@ function summarizeTrace(events) {
     gpuLikeTimeMs: Number(gpuLikeTimeMs.toFixed(2)),
     mainThreadTimeMs: Number(mainThreadTimeMs.toFixed(2)),
     rasterLikeTimeMs: Number(rasterLikeTimeMs.toFixed(2)),
+    styleLikeTimeMs: Number(styleLikeTimeMs.toFixed(2)),
+    layoutLikeTimeMs: Number(layoutLikeTimeMs.toFixed(2)),
+    paintLikeTimeMs: Number(paintLikeTimeMs.toFixed(2)),
+    compositeLikeTimeMs: Number(compositeLikeTimeMs.toFixed(2)),
+    layerLikeTimeMs: Number(layerLikeTimeMs.toFixed(2)),
+    layerEventCount,
     topEvents,
   }
+}
+
+function summarizeTraceWindow(events, startLabel, endLabel) {
+  const startTs = findMarkTimestamp(events, startLabel)
+  const endTs = findMarkTimestamp(events, endLabel)
+
+  if (startTs == null || endTs == null || endTs <= startTs) {
+    return null
+  }
+
+  const windowedEvents = events.filter(
+    (event) =>
+      typeof event.ts === 'number' && event.ts >= startTs && event.ts <= endTs,
+  )
+
+  return summarizeTrace(windowedEvents)
+}
+
+async function markPhase(cdp, label) {
+  await cdp.send('Runtime.evaluate', {
+    expression: `performance.mark(${JSON.stringify(label)});`,
+  })
 }
 
 async function measureScene(cdp) {
@@ -300,6 +376,7 @@ async function measureScene(cdp) {
   })
 
   await sleep(1800)
+  await markPhase(cdp, 'phase:scroll-start')
 
   await cdp.send('Runtime.evaluate', {
     expression: `
@@ -326,7 +403,9 @@ async function measureScene(cdp) {
     awaitPromise: true,
   })
 
+  await markPhase(cdp, 'phase:scroll-end')
   await sleep(600)
+  await markPhase(cdp, 'phase:hover-start')
 
   const viewport = await cdp.send('Runtime.evaluate', {
     expression: `(() => ({ width: window.innerWidth, height: window.innerHeight }))()`,
@@ -352,6 +431,7 @@ async function measureScene(cdp) {
     await sleep(220)
   }
 
+  await markPhase(cdp, 'phase:focus-click')
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mousePressed',
     x: width * 0.54,
@@ -368,23 +448,112 @@ async function measureScene(cdp) {
   })
 
   await sleep(1200)
+  await markPhase(cdp, 'phase:card-open')
+
+  const cardActionPoints = await cdp.send('Runtime.evaluate', {
+    expression: `
+      (() => {
+        const cta = document.querySelector('.focused-project-card__cta');
+        const dismiss = document.querySelector('.focused-project-card__dismiss');
+        const getPoint = (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return null;
+          }
+
+          const rect = element.getBoundingClientRect();
+          return {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          };
+        };
+
+        return {
+          cta: getPoint(cta),
+          dismiss: getPoint(dismiss),
+        };
+      })();
+    `,
+    returnByValue: true,
+  })
+
+  const actionPoints = cardActionPoints.result.value
+  const ctaPoint = actionPoints?.cta ?? null
+  const dismissPoint = actionPoints?.dismiss ?? null
+
+  if (ctaPoint) {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: ctaPoint.x,
+      y: ctaPoint.y,
+      buttons: 0,
+    })
+    await sleep(250)
+  }
+
+  if (dismissPoint) {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: dismissPoint.x,
+      y: dismissPoint.y,
+      buttons: 0,
+    })
+    await sleep(250)
+  }
+
+  await markPhase(cdp, 'phase:card-close')
+  if (dismissPoint) {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: dismissPoint.x,
+      y: dismissPoint.y,
+      button: 'left',
+      clickCount: 1,
+    })
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: dismissPoint.x,
+      y: dismissPoint.y,
+      button: 'left',
+      clickCount: 1,
+    })
+  } else {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: width * 0.16,
+      y: height * 0.18,
+      button: 'left',
+      clickCount: 1,
+    })
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: width * 0.16,
+      y: height * 0.18,
+      button: 'left',
+      clickCount: 1,
+    })
+  }
 
   await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: width * 0.16,
-    y: height * 0.18,
-    button: 'left',
-    clickCount: 1,
-  })
-  await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: width * 0.16,
-    y: height * 0.18,
-    button: 'left',
-    clickCount: 1,
+    type: 'mouseMoved',
+    x: width * 0.42,
+    y: height * 0.52,
+    buttons: 0,
   })
 
   await sleep(800)
+  await markPhase(cdp, 'phase:post-close-scroll')
+  await cdp.send('Runtime.evaluate', {
+    expression: `
+      (() => {
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        window.scrollTo({ top: maxScroll * 0.72, behavior: 'instant' });
+        return true;
+      })();
+    `,
+    awaitPromise: true,
+  })
+  await sleep(600)
+  await markPhase(cdp, 'phase:trace-end')
 
   await cdp.send('Runtime.evaluate', {
     expression: `window.__codexPerf.markStop();`,
@@ -415,9 +584,27 @@ async function measureScene(cdp) {
   })
 
   const traceSummary = summarizeTrace(traceEvents)
+  const phaseSummary = {
+    cardOpenWindow: summarizeTraceWindow(
+      traceEvents,
+      'phase:focus-click',
+      'phase:card-open',
+    ),
+    cardInteractiveWindow: summarizeTraceWindow(
+      traceEvents,
+      'phase:card-open',
+      'phase:card-close',
+    ),
+    postCloseScrollWindow: summarizeTraceWindow(
+      traceEvents,
+      'phase:card-close',
+      'phase:trace-end',
+    ),
+  }
 
   return {
     frameSummary: frameData.result.value,
+    phaseSummary,
     traceSummary,
   }
 }
@@ -453,6 +640,7 @@ async function main() {
 
   const summary = {
     ...report.frameSummary,
+    phaseSummary: report.phaseSummary,
     traceSummary: report.traceSummary,
   }
 

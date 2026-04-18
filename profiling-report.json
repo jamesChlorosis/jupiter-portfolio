@@ -1,51 +1,174 @@
 {
   "frameSummary": {
-    "sampleCount": 501,
-    "averageFrameMs": 16.88423153692689,
-    "minFps": 14.925373134328359,
-    "averageFps": 59.66044425261549,
-    "longFrames": 262,
+    "sampleCount": 539,
+    "averageFrameMs": 17.24805194805195,
+    "minFps": 4.271678769756508,
+    "averageFps": 59.618835017680574,
+    "longFrames": 311,
     "severeFrames": 2,
-    "maxFrameMs": 67,
+    "maxFrameMs": 234.10000000000036,
     "p95FrameMs": 16.80000000000109,
-    "p99FrameMs": 16.90000000000009
+    "p99FrameMs": 16.900000000000546
+  },
+  "phaseSummary": {
+    "cardOpenWindow": {
+      "gpuLikeTimeMs": 319.43,
+      "mainThreadTimeMs": 3584.54,
+      "rasterLikeTimeMs": 7.04,
+      "styleLikeTimeMs": 0,
+      "layoutLikeTimeMs": 0,
+      "paintLikeTimeMs": 7.04,
+      "compositeLikeTimeMs": 0,
+      "layerLikeTimeMs": 1.46,
+      "layerEventCount": 312,
+      "topEvents": [
+        {
+          "name": "RunTask",
+          "totalMs": 2580.87
+        },
+        {
+          "name": "FunctionCall",
+          "totalMs": 830.29
+        },
+        {
+          "name": "Scheduler::RunTask",
+          "totalMs": 120.03
+        },
+        {
+          "name": "GpuChannel::ExecuteDeferredRequest",
+          "totalMs": 34.74
+        },
+        {
+          "name": "GPUTask",
+          "totalMs": 33.96
+        },
+        {
+          "name": "FireAnimationFrame",
+          "totalMs": 31.11
+        },
+        {
+          "name": "CommandBuffer::Flush",
+          "totalMs": 30.04
+        },
+        {
+          "name": "WebGL",
+          "totalMs": 29.96
+        }
+      ]
+    },
+    "cardInteractiveWindow": {
+      "gpuLikeTimeMs": 0,
+      "mainThreadTimeMs": 2.78,
+      "rasterLikeTimeMs": 0,
+      "styleLikeTimeMs": 0,
+      "layoutLikeTimeMs": 0,
+      "paintLikeTimeMs": 0,
+      "compositeLikeTimeMs": 0,
+      "layerLikeTimeMs": 0,
+      "layerEventCount": 0,
+      "topEvents": [
+        {
+          "name": "RunTask",
+          "totalMs": 1.73
+        },
+        {
+          "name": "FunctionCall",
+          "totalMs": 0.74
+        },
+        {
+          "name": "EvaluateScript",
+          "totalMs": 0.3
+        }
+      ]
+    },
+    "postCloseScrollWindow": {
+      "gpuLikeTimeMs": 341.95,
+      "mainThreadTimeMs": 4180.1,
+      "rasterLikeTimeMs": 7.39,
+      "styleLikeTimeMs": 0,
+      "layoutLikeTimeMs": 0,
+      "paintLikeTimeMs": 7.39,
+      "compositeLikeTimeMs": 0,
+      "layerLikeTimeMs": 1.67,
+      "layerEventCount": 367,
+      "topEvents": [
+        {
+          "name": "RunTask",
+          "totalMs": 3005.52
+        },
+        {
+          "name": "FunctionCall",
+          "totalMs": 1005.46
+        },
+        {
+          "name": "Scheduler::RunTask",
+          "totalMs": 134.3
+        },
+        {
+          "name": "FireAnimationFrame",
+          "totalMs": 36.42
+        },
+        {
+          "name": "GpuChannel::ExecuteDeferredRequest",
+          "totalMs": 35.2
+        },
+        {
+          "name": "GPUTask",
+          "totalMs": 34.32
+        },
+        {
+          "name": "WebGL",
+          "totalMs": 30.74
+        },
+        {
+          "name": "CommandBuffer::Flush",
+          "totalMs": 30.51
+        }
+      ]
+    }
   },
   "traceSummary": {
-    "gpuLikeTimeMs": 2741.15,
-    "mainThreadTimeMs": 25421.63,
-    "rasterLikeTimeMs": 148.57,
+    "gpuLikeTimeMs": 9088.94,
+    "mainThreadTimeMs": 30156.03,
+    "rasterLikeTimeMs": 129.39,
+    "styleLikeTimeMs": 0.07,
+    "layoutLikeTimeMs": 0,
+    "paintLikeTimeMs": 129.39,
+    "compositeLikeTimeMs": 0,
+    "layerLikeTimeMs": 30.17,
+    "layerEventCount": 2641,
     "topEvents": [
       {
         "name": "RunTask",
-        "totalMs": 17884.33
+        "totalMs": 21057.78
       },
       {
         "name": "FunctionCall",
-        "totalMs": 6347.98
+        "totalMs": 6405.64
       },
       {
         "name": "Scheduler::RunTask",
-        "totalMs": 710.3
-      },
-      {
-        "name": "FireAnimationFrame",
-        "totalMs": 328.67
+        "totalMs": 1959.37
       },
       {
         "name": "GpuChannel::ExecuteDeferredRequest",
-        "totalMs": 321.35
+        "totalMs": 1203.81
       },
       {
         "name": "GPUTask",
-        "totalMs": 314.59
+        "totalMs": 1191.55
       },
       {
         "name": "CommandBuffer::Flush",
-        "totalMs": 289.96
+        "totalMs": 1143.03
       },
       {
         "name": "CommandBufferStub::OnAsyncFlush",
-        "totalMs": 288.8
+        "totalMs": 1141.15
+      },
+      {
+        "name": "CommandBufferService:PutChanged",
+        "totalMs": 1127.41
       }
     ]
   }
